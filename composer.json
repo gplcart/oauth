@@ -1,0 +1,19 @@
+{
+  "name": "gplcart/oauth",
+  "type": "gplcart-module",
+  "description": "API module for Oauth authentication",
+  "keywords": [
+    "gplcart",
+    "ecommerce",
+    "shopping cart",
+    "gplcart module",
+    "oauth",
+    "php"
+  ],
+  "license": "GPL-3.0-or-later",
+  "require": {
+    "gplcart/composer-module-installer": "*"
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true
+}
