@@ -11,8 +11,9 @@ namespace gplcart\modules\oauth\helpers;
 
 use DateTime;
 use InvalidArgumentException;
-use LengthException;
+use LogicException;
 use OutOfRangeException;
+use RuntimeException;
 use UnexpectedValueException;
 
 /**
@@ -35,20 +36,16 @@ class Jwt
      * An array of supported algorithms
      * @var array
      */
-    protected $algorithms;
+    protected $algs;
 
     /**
      * Jwt constructor
      */
     public function __construct()
     {
-        $this->algorithms = array(
-            'HS256' => array('hash_hmac', 'SHA256'),
-            'HS512' => array('hash_hmac', 'SHA512'),
-            'HS384' => array('hash_hmac', 'SHA384'),
-            'RS256' => array('openssl', 'SHA256'),
-            'RS384' => array('openssl', 'SHA384'),
-            'RS512' => array('openssl', 'SHA512'),
+        $this->algs = array(
+            'HS256' => array('SHA256', array($this, 'signHmac'), array($this, 'verifyHmac')),
+            'HS512' => array('SHA512', array($this, 'signHmac'), array($this, 'verifyHmac'))
         );
     }
 
@@ -75,15 +72,16 @@ class Jwt
     }
 
     /**
-     * Sets a supported algorithm
+     * Sets an algorithm
      * @param string $name
-     * @param string $function
      * @param string $hash_method
+     * @param callable $signer
+     * @param callable $verifier
      * @return $this
      */
-    public function setAlgorithm($name, $function, $hash_method)
+    public function setAlg($name, $hash_method, callable $signer, callable $verifier)
     {
-        $this->algorithms[strtoupper($name)] = array($function, strtoupper($hash_method));
+        $this->algs[strtoupper($name)] = array(strtoupper($hash_method), $signer, $verifier);
         return $this;
     }
 
@@ -91,19 +89,18 @@ class Jwt
      * Returns an array of supported algorithms
      * @return array
      */
-    public function getAlgorithms()
+    public function getAlgs()
     {
-        return $this->algorithms;
+        return $this->algs;
     }
 
     /**
      * Decodes a JWT string into a PHP object
      * @param string $jwt
-     * @param mixed $key
+     * @param string $key
      * @param array $allowed_algs
      * @return object
-     * @throws LengthException
-     * @throws OutOfRangeException
+     * @throws RuntimeException
      * @throws InvalidArgumentException
      * @throws UnexpectedValueException
      */
@@ -120,7 +117,7 @@ class Jwt
         $tks = explode('.', $jwt);
 
         if (count($tks) != 3) {
-            throw new LengthException('Wrong number of segments');
+            throw new UnexpectedValueException('Wrong number of segments');
         }
 
         list($headb64, $bodyb64, $cryptob64) = $tks;
@@ -144,44 +141,31 @@ class Jwt
         }
 
         if (empty($header->alg)) {
-            throw new OutOfRangeException('Empty algorithm');
+            throw new UnexpectedValueException('Empty algorithm');
         }
 
-        if (empty($this->algorithms[$header->alg])) {
-            throw new OutOfRangeException('Algorithm not supported');
+        if (empty($this->algs[$header->alg])) {
+            throw new UnexpectedValueException('Algorithm not supported');
         }
 
-        if (!in_array($header->alg, $allowed_algs)) {
-            throw new OutOfRangeException('Algorithm not allowed');
-        }
-
-        if (is_array($key) || $key instanceof \ArrayAccess) {
-
-            if (!isset($header->kid)) {
-                throw new OutOfRangeException('"kid" empty, unable to lookup correct key');
-            }
-
-            if (!isset($key[$header->kid])) {
-                throw new OutOfRangeException('"kid" invalid, unable to lookup correct key');
-            }
-
-            $key = $key[$header->kid];
+        if (!empty($allowed_algs) && !in_array($header->alg, $allowed_algs)) {
+            throw new RuntimeException('Algorithm not allowed');
         }
 
         if (!$this->verify("$headb64.$bodyb64", $sig, $key, $header->alg)) {
-            throw new UnexpectedValueException('Signature verification failed');
+            throw new RuntimeException('Signature verification failed');
         }
 
         if (isset($payload->nbf) && $payload->nbf > ($this->timestamp + $this->leeway)) {
-            throw new UnexpectedValueException('Cannot handle token prior to ' . date(DateTime::ISO8601, $payload->nbf));
+            throw new RuntimeException('Cannot handle token prior to ' . date(DateTime::ISO8601, $payload->nbf));
         }
 
         if (isset($payload->iat) && $payload->iat > ($this->timestamp + $this->leeway)) {
-            throw new UnexpectedValueException('Cannot handle token prior to ' . date(DateTime::ISO8601, $payload->iat));
+            throw new RuntimeException('Cannot handle token prior to ' . date(DateTime::ISO8601, $payload->iat));
         }
 
         if (isset($payload->exp) && ($this->timestamp - $this->leeway) >= $payload->exp) {
-            throw new UnexpectedValueException('Expired token');
+            throw new RuntimeException('Expired token');
         }
 
         return $payload;
@@ -192,11 +176,11 @@ class Jwt
      * @param object|array $payload
      * @param string $key
      * @param string $alg
-     * @param mixed $key_id
+     * @param null|string $key_id
      * @param array $head
      * @return string
      */
-    public function encode($payload, $key, $alg = 'HS256', $key_id = null, $head = null)
+    public function encode($payload, $key, $alg = 'HS256', $key_id = null, array $head = array())
     {
         $header = array('typ' => 'JWT', 'alg' => $alg);
 
@@ -204,7 +188,7 @@ class Jwt
             $header['kid'] = $key_id;
         }
 
-        if (isset($head) && is_array($head)) {
+        if (!empty($head)) {
             $header = array_merge($head, $header);
         }
 
@@ -213,8 +197,8 @@ class Jwt
         $segments[] = $this->encodeBase64($this->jsonEncode($payload));
 
         $signing_input = implode('.', $segments);
-
         $signature = $this->sign($signing_input, $key, $alg);
+
         $segments[] = $this->encodeBase64($signature);
 
         return implode('.', $segments);
@@ -222,106 +206,144 @@ class Jwt
 
     /**
      * Sign a string with a given key and algorithm
-     * @param string $msg
+     * @param string $data
      * @param string|resource $key
      * @param string $alg
      * @return string
      * @throws OutOfRangeException
-     * @throws UnexpectedValueException
+     * @throws RuntimeException
+     * @throws LogicException
      */
-    public function sign($msg, $key, $alg = 'HS256')
+    public function sign($data, $key, $alg = 'HS256')
     {
-        if (empty($this->algorithms[$alg])) {
+        if (empty($this->algs[$alg])) {
             throw new OutOfRangeException('Algorithm not supported');
         }
 
-        list($function, $algorithm) = $this->algorithms[$alg];
+        list($func_alg, $function) = $this->algs[$alg];
 
-        if ($function === 'hash_hmac') {
-            return hash_hmac($algorithm, $msg, $key, true);
+        if (is_callable($function)) {
+            return $function($data, $key, $func_alg);
         }
 
-        if ($function === 'openssl') {
+        throw new LogicException('Unknown signer');
+    }
 
-            $signature = '';
-            $success = openssl_sign($msg, $signature, $key, $algorithm);
+    /**
+     * Generate signature using HMAC method
+     * @param string $data
+     * @param string $key
+     * @param string $alg
+     * @return string
+     * @throws RuntimeException
+     */
+    protected function signHmac($data, $key, $alg)
+    {
+        $hash = hash_hmac($alg, $data, $key, true);
 
-            if ($success) {
-                return $signature;
-            }
-
-            throw new UnexpectedValueException('OpenSSL unable to sign data');
+        if (empty($hash)) {
+            throw new RuntimeException('Unable to sign data using HMAC method');
         }
 
-        throw new UnexpectedValueException('Unknown signer');
+        return $hash;
     }
 
     /**
      * Verify a signature with the message, key and method
-     * @param string $msg
-     * @param string $signature
+     * @param string $data
+     * @param string $hash
      * @param string|resource $key
      * @param string $alg
      * @return bool
      * @throws OutOfRangeException
-     * @throws InvalidArgumentException
-     * @throws UnexpectedValueException
+     * @throws LogicException
      */
-    public function verify($msg, $signature, $key, $alg)
+    public function verify($data, $hash, $key, $alg)
     {
-        if (empty($this->algorithms[$alg])) {
+        if (empty($this->algs[$alg])) {
             throw new OutOfRangeException('Algorithm not supported');
         }
 
-        list($function, $algorithm) = $this->algorithms[$alg];
+        $func_alg = $this->algs[$alg][0];
+        $function = $this->algs[$alg][2];
 
-        if ($function === 'openssl') {
-
-            $success = openssl_verify($msg, $signature, $key, $algorithm);
-
-            if ($success === 1) {
-                return true;
-            }
-
-            if ($success === 0) {
-                return false;
-            }
-
-            throw new InvalidArgumentException('OpenSSL error: ' . openssl_error_string());
+        if (is_callable($function)) {
+            return $function($data, $hash, $key, $func_alg);
         }
 
-        if ($function === 'hash_hmac') {
-            $hash = hash_hmac($algorithm, $msg, $key, true);
-            return gplcart_string_equals($signature, $hash);
+        throw new LogicException('Unsupported verifier');
+    }
+
+    /**
+     * Verify signature using HMAC method
+     * @param string $data
+     * @param string $hash
+     * @param string $key
+     * @param string $alg
+     * @return bool
+     * @throws RuntimeException
+     */
+    protected function verifyHmac($data, $hash, $key, $alg)
+    {
+        $hashed = hash_hmac($alg, $data, $key, true);
+
+        if (empty($hashed)) {
+            throw new RuntimeException('Unable to hash data for verifying using HMAC method');
         }
 
-        throw new UnexpectedValueException('Unknown verifier');
+        return $this->hashEquals($hash, $hashed);
+    }
+
+    /**
+     * Compares two hashed strings
+     * @param string $str1
+     * @param string $str2
+     * @return boolean
+     */
+    protected function hashEquals($str1, $str2)
+    {
+        if (function_exists('hash_equals')) {
+            return hash_equals($str1, $str2);
+        }
+
+        if (strlen($str1) != strlen($str2)) {
+            return false;
+        }
+
+        $res = $str1 ^ $str2;
+        $ret = 0;
+
+        for ($i = strlen($res) - 1; $i >= 0; $i--) {
+            $ret |= ord($res[$i]);
+        }
+
+        return !$ret;
     }
 
     /**
      * Decode a JSON string into a PHP object
      * @param string $input
      * @return object
-     * @throws InvalidArgumentException
+     * @throws RuntimeException
      */
-    public function jsonDecode($input)
+    protected function jsonDecode($input)
     {
-        $object = json_decode($input, false, 512, JSON_BIGINT_AS_STRING);
+        $object = json_decode($input);
 
         if (json_last_error() === JSON_ERROR_NONE) {
             return $object;
         }
 
-        throw new InvalidArgumentException('Failed to decode JSON string');
+        throw new RuntimeException('Failed to decode JSON string');
     }
 
     /**
      * Encode a PHP object into a JSON string
      * @param object|array $input
      * @return string
-     * @throws InvalidArgumentException
+     * @throws RuntimeException
      */
-    public function jsonEncode($input)
+    protected function jsonEncode($input)
     {
         $json = json_encode($input);
 
@@ -329,7 +351,7 @@ class Jwt
             return $json;
         }
 
-        throw new InvalidArgumentException('Failed to encode JSON string');
+        throw new RuntimeException('Failed to encode JSON string');
     }
 
     /**
