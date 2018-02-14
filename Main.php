@@ -72,4 +72,15 @@ class Main
         $instance = Container::get('gplcart\\modules\\oauth\\models\\Oauth');
         return $instance;
     }
+
+    /**
+     * Returns JWT helper class instance
+     * @return \gplcart\modules\oauth\helpers\JwtHelper
+     */
+    public function getJwtHelper()
+    {
+        /** @var \gplcart\modules\oauth\helpers\Jwt $instance */
+        $instance = Container::get('gplcart\\modules\\oauth\\helpers\\Jwt');
+        return $instance;
+    }
 }
