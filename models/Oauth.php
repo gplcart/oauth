@@ -11,11 +11,11 @@ namespace gplcart\modules\oauth\models;
 
 use Exception;
 use gplcart\core\Handler;
-use gplcart\core\helpers\Session as SessionHelper;
-use gplcart\core\helpers\Url as UrlHelper;
+use gplcart\core\helpers\Session;
+use gplcart\core\helpers\Url;
 use gplcart\core\Hook;
-use gplcart\core\models\Http as HttpModel;
-use gplcart\modules\oauth\helpers\Jwt as JwtHelper;
+use gplcart\core\models\Http;
+use gplcart\modules\oauth\helpers\Jwt;
 use OutOfRangeException;
 use UnexpectedValueException;
 
@@ -56,13 +56,14 @@ class Oauth
     protected $session;
 
     /**
+     * Oauth constructor.
      * @param Hook $hook
-     * @param HttpModel $http
-     * @param JwtHelper $jwt
-     * @param SessionHelper $session
-     * @param UrlHelper $url
+     * @param Http $http
+     * @param Jwt $jwt
+     * @param Session $session
+     * @param Url $url
      */
-    public function __construct(Hook $hook, HttpModel $http, JwtHelper $jwt, SessionHelper $session, UrlHelper $url)
+    public function __construct(Hook $hook, Http $http, Jwt $jwt, Session $session, Url $url)
     {
         $this->jwt = $jwt;
         $this->url = $url;

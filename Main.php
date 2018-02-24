@@ -75,7 +75,7 @@ class Main
 
     /**
      * Returns JWT helper class instance
-     * @return \gplcart\modules\oauth\helpers\JwtHelper
+     * @return \gplcart\modules\oauth\helpers\Jwt
      */
     public function getJwtHelper()
     {

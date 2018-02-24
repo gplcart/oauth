@@ -10,15 +10,15 @@
 namespace gplcart\modules\oauth\controllers;
 
 use Exception;
-use gplcart\core\controllers\frontend\Controller as FrontendController;
-use gplcart\modules\oauth\models\Oauth as ModuleOauthModel;
+use gplcart\core\controllers\frontend\Controller;
+use gplcart\modules\oauth\models\Oauth as OauthModel;
 use InvalidArgumentException;
 use OutOfRangeException;
 
 /**
  * Handles incoming requests and outputs data related to Oauth functionality
  */
-class Oauth extends FrontendController
+class Oauth extends Controller
 {
 
     /**
@@ -64,9 +64,9 @@ class Oauth extends FrontendController
     protected $data_result;
 
     /**
-     * @param ModuleOauthModel $oauth
+     * @param OauthModel $oauth
      */
-    public function __construct(ModuleOauthModel $oauth)
+    public function __construct(OauthModel $oauth)
     {
         parent::__construct();
 
